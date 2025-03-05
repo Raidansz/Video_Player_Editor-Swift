@@ -10,12 +10,10 @@ import SwiftUI
 // MARK: - Video Editor View
 struct VideoEditorRouter: View {
     @Binding var loadState: LoadState
-    @StateObject private var playerVM = PlayerViewModel()
-
     var body: some View {
         switch loadState {
         case .loaded(let video):
-            CustomPlayerView(playerVM: playerVM, videoURL: video.url)
+            PlayerView(viewModel: .init(videoURL: video.url))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .unknown:
             Text("Select a video to start")

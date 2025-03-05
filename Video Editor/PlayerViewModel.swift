@@ -5,165 +5,148 @@
 //  Created by Raidan on 2025. 03. 03..
 //
 
-import AVFoundation
+import Foundation
 import Combine
 import CoreTransferable
-import UIKit
 
-// MARK: - Player View Model
-final class PlayerViewModel: ObservableObject {
-    let player = AVPlayer()
-    @Published var isInPipMode = false
-    @Published var isPlaying = false
-    @Published var isEditingCurrentTime = false
-    @Published var isSeeking = false
-    @Published var currentTime: Double = 0
-    @Published var duration: Double?
-    @Published private var thumbnailFrames: [UIImage] = []
-    @Published var draggingImage: UIImage?
+class PlayerViewModel: ObservableObject {
+    @ObservationIgnored private let sharedStateManager = PlaybackQueue.shared
+    @Published var totalTime: Double = 0
+    @Published var elapsedTime: Double = 0
+    @Published var playerStatus: PlaybackState = .waitingForSelection
+    @Published var isPlaying: Bool = false
+    @Published var isInPipMode: Bool = false
 
-    private var subscriptions = Set<AnyCancellable>()
-    private var timeObserver: Any?
+    private var cancellables: Set<AnyCancellable> = []
+
+    var currentItem: VideoItem? {
+        return sharedStateManager.currentItem
+    }
+
+    init(videoURL: URL) {
+        sharedStateManager.setPlaybackQueue(for: "video", items: [.init(url: videoURL)])
+        play()
+    }
 
     deinit {
-        removeTimeObserver()
-        subscriptions.forEach { $0.cancel() }
+        cancellables.forEach { $0.cancel() }
+        cancellables.removeAll()
+        PODLogInfo("PlayerViewModel deinitialized")
     }
 
-    init() {
-        setupBindings()
+    func play() {
+        guard let currentItem = currentItem else {
+            PODLogError("No current Video to play")
+            return
+        }
+        cleanupSubscriptions()
+        subscribe()
+        VideoPlayer.shared.play(item: currentItem)
     }
 
-    private func removeTimeObserver() {
-        if let timeObserver = timeObserver {
-            player.removeTimeObserver(timeObserver)
-            self.timeObserver = nil
+    func stop() {
+        cleanupSubscriptions()
+        VideoPlayer.shared.stop()
+        sharedStateManager.cleanupQueue()
+    }
+
+    func pause() {
+        VideoPlayer.shared.pause()
+    }
+
+    func resume() {
+        VideoPlayer.shared.resume()
+    }
+
+    func handlePlayButton() {
+        guard let item = self.currentItem else {
+            return
+        }
+        switch playerStatus {
+        case .playing:
+            if let beingPlayedItem = VideoPlayer.shared.currentItem {
+                if beingPlayedItem  == item {
+                    VideoPlayer.shared.pause()
+                } else {
+                    VideoPlayer.shared.play(item: item)
+                }
+            }
+        case .paused:
+            if let beingPlayedItem = VideoPlayer.shared.currentItem {
+                if beingPlayedItem == item {
+                    VideoPlayer.shared.resume()
+                } else {
+                    VideoPlayer.shared.play(item: item)
+                }
+            } else {
+                VideoPlayer.shared.play(item: item)
+            }
+        case .stopped:
+            VideoPlayer.shared.play(item: item)
+        default:
+            break
         }
     }
 
-    private func setupBindings() {
-        $isEditingCurrentTime
-            .dropFirst()
-            .sink { [weak self] isEditing in
-                guard let self else { return }
-                self.isSeeking = isEditing
-                if !isEditing {
-                    let time = CMTime(seconds: self.currentTime, preferredTimescale: 600)
-                    self.player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
-                        if self.isPlaying {
-                            self.player.playImmediately(atRate: 1.0)
-                        }
-                    }
-                }
-            }
-            .store(in: &subscriptions)
+    func subscribe() {
+        guard let item = self.currentItem else {
+            return
+        }
 
-        // Real-time seeking observer
-        $currentTime
-            .combineLatest($isSeeking)
-            .filter { $1 } // Only when seeking
-            .sink { [weak self] time, _ in
-                guard let self, !self.thumbnailFrames.isEmpty else { return }
-                let totalDuration = self.duration ?? 0
-                guard totalDuration > 0 else { return }
-                
-                // Calculate frame index based on current time
-                let progress = time / totalDuration
-                let frameIndex = min(
-                    max(Int(progress * Double(self.thumbnailFrames.count)), 0),
-                    self.thumbnailFrames.count - 1
-                )
-                
-                Task { @MainActor in
-                    self.draggingImage = self.thumbnailFrames[frameIndex]
-                }
+        VideoPlayer.shared.elapsedTimeObserver
+            .sink { [weak self] value in
+                guard let self = self,
+                      VideoPlayer.shared.currentItem == item else { return }
+                self.elapsedTime = value
             }
-            .store(in: &subscriptions)
+            .store(in: &cancellables)
 
-        player.publisher(for: \.timeControlStatus)
-            .receive(on: DispatchQueue.main)
+        VideoPlayer.shared.playbackStatePublisher
             .sink { [weak self] status in
-                guard let self else { return }
-                Task { @MainActor in
-                    self.isPlaying = status == .playing
-                }
-            }
-            .store(in: &subscriptions)
-
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 1, preferredTimescale: 600), queue: .main) { [weak self] time in
-            guard let self, !self.isEditingCurrentTime else { return }
-            Task { @MainActor in
-                self.currentTime = time.seconds
-            }
-        }
-    }
-
-    @MainActor
-    func setCurrentItem(_ item: AVPlayerItem) {
-        currentTime = 0
-        duration = nil
-        draggingImage = nil
-        thumbnailFrames.removeAll()
-        player.replaceCurrentItem(with: item)
-        player.playImmediately(atRate: 1.0)
-
-        item.publisher(for: \.status)
-            .filter { $0 == .readyToPlay }
-            .sink { [weak self] _ in
-                guard let self else { return }
-                Task {
-                    do {
-                        let duration = try await item.asset.load(.duration).seconds
-                        await MainActor.run {
-                            self.duration = duration
-                        }
-                    } catch {
-                        print("Failed to load duration: \(error.localizedDescription)")
+                guard let self = self else { return }
+                if let item = VideoPlayer.shared.currentItem {
+                    if item == item {
+                        self.playerStatus = status
+                        self.isPlaying = (status == .playing)
+                    } else {
+                        self.playerStatus = .stopped
+                        self.isPlaying = false
                     }
+                } else {
+                    self.playerStatus = status
+                    self.isPlaying = (status == .playing)
                 }
             }
-            .store(in: &subscriptions)
-        generateThumbnailFrames()
-    }
+            .store(in: &cancellables)
 
-    @MainActor
-    func togglePipMode() {
-        isInPipMode.toggle()
-    }
-
-    func generateThumbnailFrames() {
-        Task.detached { [weak self] in
-            guard let self, let asset = await self.player.currentItem?.asset else { return }
-            let generator = AVAssetImageGenerator(asset: asset)
-            generator.appliesPreferredTrackTransform = true
-            generator.maximumSize = .init(width: 250, height: 250)
-            
-            do {
-                let totalDuration = try await asset.load(.duration).seconds
-                let frameCount = min(100, Int(totalDuration / 0.01))
-                var frameTimes: [CMTime] = []
-                
-                let step = totalDuration / Double(frameCount)
-                for i in 0..<frameCount {
-                    let time = CMTime(seconds: Double(i) * step, preferredTimescale: 600)
-                    frameTimes.append(time)
-                }
-                
-                for await result in generator.images(for: frameTimes) {
-                    let cgImage = try result.image
-                    await MainActor.run(body: {
-                        self.thumbnailFrames.append(UIImage(cgImage: cgImage))
-                    })
-                }
-            } catch {
-                print("Thumbnail generation failed: \(error.localizedDescription)")
+        VideoPlayer.shared.totalItemTimeObserver
+            .sink { [weak self] value in
+                guard let self = self,
+                      VideoPlayer.shared.currentItem == item else { return }
+                self.totalTime = value
             }
-        }
+            .store(in: &cancellables)
+    }
+
+    private func cleanupSubscriptions() {
+        cancellables.forEach { $0.cancel() }
+        cancellables.removeAll()
+    }
+
+    // MARK: - Protocol Methods
+    func seek() {}
+
+    func seekFifteenForward() {
+        VideoPlayer.shared.seekFifteenForward()
+    }
+
+    func seekFifteenBackward() {
+        VideoPlayer.shared.seekFifteenBackward()
     }
 }
 
 // MARK: - Video Transferable
-public struct VideoItem: Transferable {
+public struct VideoItem: Transferable, Equatable {
     let url: URL
 
     public static var transferRepresentation: some TransferRepresentation {
