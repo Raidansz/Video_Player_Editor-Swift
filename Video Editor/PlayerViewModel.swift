@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 import CoreTransferable
+import UIKit
 
 class PlayerViewModel: ObservableObject {
     @ObservationIgnored private let sharedStateManager = PlaybackQueue.shared
@@ -15,6 +16,8 @@ class PlayerViewModel: ObservableObject {
     @Published var elapsedTime: Double = 0
     @Published var playerStatus: PlaybackState = .waitingForSelection
     @Published var isPlaying: Bool = false
+    @Published var isSeeking: Bool = false
+    @Published var frameImage: UIImage?
     @Published var isInPipMode: Bool = false
 
     private var cancellables: Set<AnyCancellable> = []
@@ -65,7 +68,7 @@ class PlayerViewModel: ObservableObject {
         switch playerStatus {
         case .playing:
             if let beingPlayedItem = VideoPlayer.shared.currentItem {
-                if beingPlayedItem  == item {
+                if beingPlayedItem == item {
                     VideoPlayer.shared.pause()
                 } else {
                     VideoPlayer.shared.play(item: item)
@@ -132,9 +135,6 @@ class PlayerViewModel: ObservableObject {
         cancellables.forEach { $0.cancel() }
         cancellables.removeAll()
     }
-
-    // MARK: - Protocol Methods
-    func seek() {}
 
     func seekFifteenForward() {
         VideoPlayer.shared.seekFifteenForward()
