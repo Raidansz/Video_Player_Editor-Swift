@@ -9,16 +9,12 @@ import SwiftUI
 
 struct PlayerView: View {
     @ObservedObject var viewModel: PlayerViewModel
-
+    
     var body: some View {
         GeometryReader { proxy in
             VStack {
                 CustomVideoPlayer(viewModel: viewModel)
-                .aspectRatio(contentMode: .fit)
-                .frame(width: proxy.size.width, height: proxy.size.height * 0.5)
-                .clipped()
-                .shadow(color: Color.black.opacity(0.3), radius: 10, x: 10, y: 10)
-                Spacer()
+                    .frame(maxWidth: proxy.size.width, maxHeight: proxy.size.height)
                 VStack {
                     HStack {
                         Text(formatTime(seconds: viewModel.elapsedTime))
@@ -26,17 +22,22 @@ struct PlayerView: View {
                         Text(formatTime(seconds: viewModel.totalTime))
                     }
                     .padding(.horizontal, 16)
-
-                    Slider(
-                        value: $viewModel.elapsedTime,
-                        in: 0...viewModel.totalTime,
-                        onEditingChanged: onEditingChanged
-                    )
+                    HStack(spacing: 8) {
+                        Button {
+                            viewModel.handlePlayButton()
+                        } label: {
+                            Image(systemName: viewModel.playerStatus == .playing ? "pause.circle" : "play.circle")
+                                .font(.system(size: 25))
+                                .foregroundStyle(Color.blue)
+                        }
+                        Slider(
+                            value: $viewModel.elapsedTime,
+                            in: 0...viewModel.totalTime,
+                            onEditingChanged: onEditingChanged
+                        )
+                    }
                     .padding(.horizontal, 16)
                 }
-
-                ControllButton(viewModel: viewModel)
-                   // .padding(.bottom, safeArea.bottom)
             }
             .navigationTitle("Now Playing")
             .navigationBarTitleDisplayMode(.inline)
@@ -61,44 +62,6 @@ extension PlayerView {
             VideoPlayer.shared.shouldObserveElapsedTime = false
         } else {
             VideoPlayer.shared.seek(to: viewModel.elapsedTime)
-        }
-    }
-}
-
-struct ControllButton: View {
-    @ObservedObject var viewModel: PlayerViewModel
-
-    var body: some View {
-        VStack {
-            HStack(spacing: 25) {
-                Button {
-                    viewModel.seekFifteenBackward()
-                } label: {
-                    Image(systemName: "gobackward.15")
-                        .font(.system(size: 24))
-                        .foregroundStyle(Color.blue.opacity(0.8))
-                }
-                .frame(width: 40, height: 40)
-
-                Button {
-                    viewModel.handlePlayButton()
-                } label: {
-                    Image(systemName: viewModel.playerStatus == .playing ? "pause.circle.fill" : "play.circle.fill")
-                        .font(.system(size: 50))
-                        .foregroundStyle(Color.blue)
-                }
-                .frame(width: 60, height: 60)
-
-                Button {
-                    viewModel.seekFifteenForward()
-                } label: {
-                    Image(systemName: "goforward.15")
-                        .font(.system(size: 24))
-                        .foregroundStyle(Color.blue.opacity(0.8))
-                }
-                .frame(width: 40, height: 40)
-            }
-            .padding(.vertical, 10)
         }
     }
 }
