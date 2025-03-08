@@ -13,7 +13,7 @@ struct PlayerView: View {
     var body: some View {
         GeometryReader { proxy in
             VStack {
-                CustomVideoPlayer(viewModel: viewModel)
+                FlexibleVideoPlayerView(viewModel: viewModel)
                     .frame(maxWidth: proxy.size.width, maxHeight: proxy.size.height)
                 VStack {
                     HStack {
@@ -51,6 +51,15 @@ struct PlayerView: View {
             }
             .navigationTitle("Now Playing")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem {
+                    Button {
+                        
+                    } label: {
+                        Text("Edit")
+                    }
+                }
+            }
         }
     }
     

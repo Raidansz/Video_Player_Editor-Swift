@@ -17,7 +17,9 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             VStack {
-                PhotosPicker("Select a video", selection: $selectedItem, matching: .videos)
+                PhotosPicker(selection: $selectedItem, matching: .videos) {
+                    Text("Select a video! 🤩")
+                }
             }
             .navigationDestination(isPresented: $shouldNavigateToEditor) {
                 VideoEditorRouter(loadState: $loadState)
